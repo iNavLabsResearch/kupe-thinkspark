@@ -1,0 +1,16 @@
+# ThinkSpark — data generation + local M1 training. CPU/MPS only (no CUDA).
+# Install torch for your Mac first if you don't have it:
+#   pip install torch          # 2.x ships MPS support for Apple Silicon
+# then:
+#   pip install -r requirements.txt
+
+torch>=2.2            # MPS backend for Apple Silicon
+numpy>=1.26
+tqdm>=4.66
+matplotlib>=3.8
+pyyaml>=6.0
+
+# Data generation (Sarvam sarvam-105b via OpenAI-compatible v2 endpoint)
+openai>=1.40
+rich>=13.0            # split-screen live view (stats + SSE stream). Falls back to
+                     # a plain tqdm bar if rich is unavailable.

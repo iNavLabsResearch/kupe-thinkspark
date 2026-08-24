@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+artifacts/
+data/raw/*.jsonl
+data/raw/*.csv
+data/splits/*.jsonl
+data/vocab/*.json
+reports/*.html
+reports/*.png
+!**/.gitkeep

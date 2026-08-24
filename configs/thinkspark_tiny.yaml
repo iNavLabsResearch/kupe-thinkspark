@@ -1,0 +1,44 @@
+# ThinkSpark — tiny dual-encoder backchannel predictor for Mac M1 (MPS/CPU).
+# Every field maps 1:1 to thinkspark/config.py.
+
+data:
+  train_jsonl: data/splits/train.jsonl
+  val_jsonl: data/splits/val.jsonl
+  test_jsonl: data/splits/test.jsonl
+  label_maps: data/vocab/label_maps.json
+  max_input_len: 96        # bytes of the user utterance (primary signal)
+  max_context_len: 384     # bytes of the PAST conversation transcript (multi-turn, multilingual)
+
+model:
+  d_model: 128
+  n_heads: 4
+  input_layers: 4          # deeper encoder for the primary input
+  context_layers: 3        # multi-turn multilingual context needs capacity
+  fusion_layers: 2         # input cross-attends into context
+  ffn_mult: 2
+  dropout: 0.1
+
+optim:
+  epochs: 12
+  batch_size: 64
+  lr: 3.0e-4
+  min_lr_ratio: 0.05
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  grad_clip: 1.0
+  w_intent: 1.0            # headline task
+  w_lang: 0.5
+  w_register: 0.3
+  w_emotion: 0.5
+  w_fillertype: 0.5
+  label_smoothing: 0.05
+
+run:
+  device: auto             # auto -> mps on M1, else cpu
+  seed: 42
+  num_workers: 0
+  output_dir: artifacts/thinkspark
+  log_every: 10
+  eval_every_epochs: 1
+  plot_every_epochs: 1
+  keep_last_checkpoints: 3

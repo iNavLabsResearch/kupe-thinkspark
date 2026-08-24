@@ -1,0 +1,9 @@
+{
+  "finished_at": "2026-08-24T00:52:05.874022+00:00",
+  "new_rows": 24842,
+  "run_rejected": 423,
+  "batch_num": 1743,
+  "run_cost_inr": 285.8490031199999,
+  "cum_cost_inr": 418.6514921199996,
+  "elapsed_sec": 5045.512447118759
+}

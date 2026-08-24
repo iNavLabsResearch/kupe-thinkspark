@@ -1,0 +1,44 @@
+# Tiny/fast config used by scripts/smoke_test.py — proves the whole pipeline on
+# a few hundred synthetic rows in well under a minute, CPU or MPS.
+
+data:
+  train_jsonl: data/splits/train.jsonl
+  val_jsonl: data/splits/val.jsonl
+  test_jsonl: data/splits/test.jsonl
+  label_maps: data/vocab/label_maps.json
+  max_input_len: 64
+  max_context_len: 192     # multi-turn multilingual context
+
+model:
+  d_model: 64
+  n_heads: 4
+  input_layers: 2
+  context_layers: 1
+  fusion_layers: 1
+  ffn_mult: 2
+  dropout: 0.1
+
+optim:
+  epochs: 3
+  batch_size: 32
+  lr: 5.0e-4
+  min_lr_ratio: 0.1
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  grad_clip: 1.0
+  w_intent: 1.0
+  w_lang: 0.5
+  w_register: 0.3
+  w_emotion: 0.5
+  w_fillertype: 0.5
+  label_smoothing: 0.05
+
+run:
+  device: auto
+  seed: 0
+  num_workers: 0
+  output_dir: artifacts/thinkspark_smoke
+  log_every: 5
+  eval_every_epochs: 1
+  plot_every_epochs: 1
+  keep_last_checkpoints: 2
