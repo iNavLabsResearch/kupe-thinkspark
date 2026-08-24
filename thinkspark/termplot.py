@@ -28,13 +28,40 @@ def _sparkline(ys: list[float], lo: float | None = None, hi: float | None = None
                    for y in ys)
 
 
-def _clear_figure() -> None:
-    # plotext renamed clear_figure()->clf() across versions; support both.
-    for name in ("clear_figure", "clf", "cld", "clear_data"):
+def _call(*names, **kwargs) -> None:
+    """Call the first attribute in `names` that exists on plotext (API drifts
+    across versions: clear_figure/clf, plotsize/plot_size, …). No-op if none."""
+    args = kwargs.pop("_args", ())
+    for name in names:
         fn = getattr(_plt, name, None)
         if callable(fn):
-            fn()
+            fn(*args, **kwargs)
             return
+
+
+def _one_plot(x, series, title, *, y01: bool) -> None:
+    """Draw a single-axis plotext chart with one or more (ys, color, label)
+    series. Avoids subplots entirely so it works on every plotext version."""
+    _call("clear_figure", "clf", "cld", "clear_data")
+    for ys, color, label in series:
+        if ys:
+            try:
+                _plt.plot(x, ys, marker="braille", color=color, label=label)
+            except Exception:
+                _plt.plot(x, ys, label=label)
+    if y01:
+        try:
+            _plt.ylim(0, 1)
+        except Exception:
+            pass
+    try:
+        _plt.title(title)
+        _plt.xlabel("epoch")
+    except Exception:
+        pass
+    _call("plotsize", "plot_size", _args=(100, 15))
+    _call("theme", _args=("clear",))
+    _plt.show()
 
 
 def render(history: dict, *, epochs_total: int | None = None) -> None:
@@ -52,23 +79,12 @@ def render(history: dict, *, epochs_total: int | None = None) -> None:
 
     if _HAS_PLOTEXT:
         try:
-            _clear_figure()
-            _plt.subplots(1, 2)
-            _plt.subplot(1, 1)
-            _plt.plot(ve, vloss, marker="braille", color="red+")
-            _plt.title("val loss")
-            _plt.xlabel("epoch")
-            _plt.subplot(1, 2)
-            if vf1:
-                _plt.plot(ve, vf1, marker="braille", color="green+", label="macro-F1")
-            if vacc:
-                _plt.plot(ve, vacc, marker="braille", color="cyan", label="intent acc")
-            _plt.ylim(0, 1)
-            _plt.title("val intent — macro-F1 / acc")
-            _plt.xlabel("epoch")
-            _plt.plotsize(100, 18)
-            _plt.theme("clear")
-            _plt.show()
+            _one_plot(ve, [(vloss, "red+", "val loss")], "val loss", y01=False)
+            _one_plot(
+                ve,
+                [(vf1, "green+", "macro-F1"), (vacc, "cyan", "intent acc")],
+                "val intent — macro-F1 / acc", y01=True,
+            )
             return
         except Exception as e:  # never let a plot break training
             print(f"  [termplot] plotext failed ({e}); ascii fallback:")

@@ -49,7 +49,14 @@ def local_rank() -> int:
 
 
 def barrier() -> None:
-    if is_dist():
+    if not is_dist():
+        return
+    # On NCCL a device-unbound barrier picks a device "under the current context"
+    # and can DEADLOCK on Kaggle T4x2 (P2P/IB disabled). Bind it to this rank's
+    # GPU so both ranks agree on the collective's device.
+    if torch.cuda.is_available():
+        torch.distributed.barrier(device_ids=[local_rank()])
+    else:
         torch.distributed.barrier()
 
 
@@ -93,8 +100,17 @@ def init_process_group() -> None:
     os.environ.setdefault("NCCL_IB_DISABLE", "1")
     backend = _backend()
     if torch.cuda.is_available():
-        torch.cuda.set_device(local_rank())
-    torch.distributed.init_process_group(backend=backend)
+        dev = torch.device("cuda", local_rank())
+        torch.cuda.set_device(dev)
+        # device_id binds the whole process group to this rank's GPU: it enables
+        # eager NCCL init and makes barrier()/collectives device-correct, which is
+        # what stops the T4x2 hang after the first epoch's eval.
+        try:
+            torch.distributed.init_process_group(backend=backend, device_id=dev)
+        except TypeError:  # older torch without device_id kwarg
+            torch.distributed.init_process_group(backend=backend)
+    else:
+        torch.distributed.init_process_group(backend=backend)
 
 
 def destroy_process_group() -> None:
