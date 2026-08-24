@@ -33,17 +33,23 @@ class Encoder(nn.Module):
         self.embed = embed  # shared byte embedding
         self.pos = nn.Embedding(max_len, d_model)
         self.max_len = max_len
+        # Token and position embeddings are both ~N(0, 0.02): we deliberately do
+        # NOT rescale tokens by sqrt(d). The old code multiplied tokens by ~13x,
+        # which drowned the positional signal — fatal for a byte model where byte
+        # ORDER is the word. norm_first + an input LayerNorm keep magnitudes sane.
+        self.in_norm = nn.LayerNorm(d_model)
+        self.in_drop = nn.Dropout(dropout)
         layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=n_heads, dim_feedforward=d_model * ffn_mult,
             dropout=dropout, activation="gelu", batch_first=True, norm_first=True,
         )
         self.enc = nn.TransformerEncoder(layer, num_layers=n_layers, enable_nested_tensor=False)
-        self.scale = d_model ** 0.5
 
     def forward(self, ids, mask):
         b, t = ids.shape
         pos = torch.arange(t, device=ids.device).clamp_max(self.max_len - 1)
-        x = self.embed(ids) * self.scale + self.pos(pos)[None]
+        x = self.embed(ids) + self.pos(pos)[None]
+        x = self.in_drop(self.in_norm(x))
         return self.enc(x, src_key_padding_mask=~mask)  # True = ignore(pad)
 
 
@@ -51,6 +57,14 @@ class ThinkSpark(nn.Module):
     def __init__(self, cfg_model, n_intent, n_lang, n_register, n_emotion, n_fillertype,
                  max_input_len, max_context_len):
         super().__init__()
+        backend = getattr(cfg_model, "encoder_backend", "byte")
+        if backend != "byte":
+            raise NotImplementedError(
+                f"encoder_backend={backend!r} is not wired yet. The default 'byte' "
+                "backend (this class) is the latency-optimised path. To use a "
+                "pretrained encoder (IndicBERT/MuRIL/XLM-R) as an accuracy lever, "
+                "add the HF featurizer + subword collate first."
+            )
         d = cfg_model.d_model
         self.embed = nn.Embedding(VOCAB_SIZE, d, padding_idx=PAD_ID)
 
@@ -73,7 +87,12 @@ class ThinkSpark(nn.Module):
         self.drop = nn.Dropout(cfg_model.dropout)
 
         def head(n_out):
-            return nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, n_out))
+            # LayerNorm -> GELU MLP -> dropout: a small non-linear classifier per
+            # task on the shared trunk. The pre-norm stabilises the multi-task grads.
+            return nn.Sequential(
+                nn.Linear(d, d), nn.GELU(), nn.LayerNorm(d),
+                nn.Dropout(cfg_model.dropout), nn.Linear(d, n_out),
+            )
 
         self.head_intent = head(n_intent)
         self.head_lang = head(n_lang)

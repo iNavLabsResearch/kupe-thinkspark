@@ -8,6 +8,7 @@ torch>=2.2            # MPS backend for Apple Silicon
 numpy>=1.26
 tqdm>=4.66
 matplotlib>=3.8
+plotext>=5.2          # realtime training curves drawn in the terminal (Kaggle/Colab)
 pyyaml>=6.0
 
 # Data generation (Sarvam sarvam-105b via OpenAI-compatible v2 endpoint)

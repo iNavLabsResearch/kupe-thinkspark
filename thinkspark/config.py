@@ -25,22 +25,30 @@ class DataCfg:
 
 @dataclass
 class ModelCfg:
-    d_model: int = 128
-    n_heads: int = 4
-    input_layers: int = 4        # depth of the (primary) input encoder
+    # Wider + slightly deeper than the original 128/4L: a byte-level model has to
+    # compose bytes -> subwords -> meaning itself, so it needs the capacity. Still
+    # tiny (~8-12M) and fast on CPU/MPS for these short sequences — latency stays low.
+    d_model: int = 192
+    n_heads: int = 6
+    input_layers: int = 5        # depth of the (primary) input encoder
     context_layers: int = 3      # multi-turn multilingual context needs capacity
     fusion_layers: int = 2       # cross-attention fusion (input queries context)
-    ffn_mult: int = 2
+    ffn_mult: int = 3
     dropout: float = 0.1
+    # Encoder backend. "byte" = the tiny from-scratch dual-encoder (default,
+    # zero-OOV, lowest latency). "hf" = a pretrained multilingual encoder
+    # (e.g. IndicBERT / MuRIL / XLM-R) — higher ceiling, higher latency; opt-in.
+    encoder_backend: str = "byte"
+    hf_model_name: str = "ai4bharat/indic-bert"
 
 
 @dataclass
 class OptimCfg:
     epochs: int = 12
     batch_size: int = 64
-    lr: float = 3.0e-4
+    lr: float = 5.0e-4           # a touch higher; warmup + cosine keep it stable
     min_lr_ratio: float = 0.05
-    weight_decay: float = 0.01
+    weight_decay: float = 0.01   # applied to matmul weights only (not norm/bias/embed)
     warmup_ratio: float = 0.05
     grad_clip: float = 1.0
     # multi-task loss weights (intent is the headline task)
@@ -50,6 +58,20 @@ class OptimCfg:
     w_emotion: float = 0.5
     w_fillertype: float = 0.5
     label_smoothing: float = 0.05
+
+    # --- imbalance handling (the fix for the flat macro-F1) --------------------
+    # Per-head loss kind: "ce" (weighted cross-entropy) or "focal".
+    # Intent is 47:1 imbalanced -> focal + class-balancing helps most.
+    loss_intent: str = "focal"
+    loss_emotion: str = "ce"
+    loss_fillertype: str = "ce"
+    loss_lang: str = "ce"
+    loss_register: str = "ce"
+    focal_gamma: float = 1.5     # 0 = plain CE; 1-2 focuses on hard/rare examples
+    # Class-balanced weighting (Cui et al. 2019). beta in [0,1); 0 disables,
+    # ->1 approaches inverse-frequency. Applied to the listed heads.
+    class_balance_beta: float = 0.999
+    balance_heads: tuple = ("intent", "emotion", "filler_type")
 
 
 @dataclass
@@ -65,6 +87,7 @@ class RunCfg:
     gpus: int = 0                # 0 = auto (use all CUDA GPUs)
     distributed: str = "auto"    # auto | on | off  (auto DDP when 2+ CUDA GPUs)
     amp: bool = True             # mixed precision on CUDA (T4 / Colab / PC)
+    term_plot: bool = True       # draw live loss/F1 curves in the terminal (Kaggle)
 
 
 @dataclass

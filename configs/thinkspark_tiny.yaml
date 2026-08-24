@@ -13,18 +13,21 @@ data:
   hf_refresh: false
 
 model:
-  d_model: 128
-  n_heads: 4
-  input_layers: 4          # deeper encoder for the primary input
+  d_model: 192             # wider than the old 128 — byte models must build words
+  n_heads: 6
+  input_layers: 5          # deeper encoder for the primary input
   context_layers: 3        # multi-turn multilingual context needs capacity
   fusion_layers: 2         # input cross-attends into context
-  ffn_mult: 2
+  ffn_mult: 3
   dropout: 0.1
+  encoder_backend: byte    # byte = tiny, zero-OOV, lowest latency (recommended)
+                           # hf   = pretrained IndicBERT/MuRIL/XLM-R (accuracy lever, higher latency)
+  hf_model_name: ai4bharat/indic-bert
 
 optim:
   epochs: 12
   batch_size: 64
-  lr: 3.0e-4
+  lr: 5.0e-4
   min_lr_ratio: 0.05
   weight_decay: 0.01
   warmup_ratio: 0.05
@@ -35,6 +38,15 @@ optim:
   w_emotion: 0.5
   w_fillertype: 0.5
   label_smoothing: 0.05
+  # --- imbalance handling: THE fix for flat macro-F1 (intent is 47:1 skewed) ---
+  loss_intent: focal       # focal loss focuses gradient on hard/rare intents
+  loss_emotion: ce
+  loss_fillertype: ce
+  loss_lang: ce
+  loss_register: ce
+  focal_gamma: 1.5
+  class_balance_beta: 0.999 # effective-number class weights (Cui 2019); 0 disables
+  balance_heads: [intent, emotion, filler_type]
 
 run:
   device: auto             # auto -> cuda (Kaggle/Colab/PC) | mps (Mac) | cpu
@@ -48,3 +60,4 @@ run:
   gpus: 0                  # 0 = use all CUDA GPUs (T4 x2 -> DDP automatically)
   distributed: auto        # auto | on | off
   amp: true                # mixed precision on CUDA
+  term_plot: true          # live loss/F1 curves drawn in the terminal (Kaggle)

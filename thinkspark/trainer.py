@@ -18,9 +18,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 
-from config.taxonomy import INTENTS
+from config.taxonomy import (
+    EMOTION2ID, FILLERTYPE2ID, INTENT2ID, INTENTS, LANG2ID, REGISTER2ID,
+)
 from .config import TrainConfig
 from .dataset import ThinkSparkDataset, collate, read_jsonl
+from .losses import build_head_losses, effective_number_weights
+from . import termplot
 from .distributed import (
     barrier,
     destroy_process_group,
@@ -52,8 +56,70 @@ def _loss_weights(cfg) -> dict:
     }
 
 
+_HEAD_ROW_KEY = {  # head -> (row field, default value, str->id map)
+    "intent": ("intent", None, INTENT2ID),
+    "language": ("language", None, LANG2ID),
+    "register": ("register", "casual", REGISTER2ID),
+    "emotion": ("emotion", "neutral", EMOTION2ID),
+    "filler_type": ("filler_type", "none", FILLERTYPE2ID),
+}
+
+
+def _class_counts(rows: list[dict], head: str, n: int) -> dict:
+    """Per-class sample counts for one head, straight from the train rows."""
+    field, default, id_map = _HEAD_ROW_KEY[head]
+    counts = {i: 0 for i in range(n)}
+    for r in rows:
+        val = r.get(field, default) if default is not None else r[field]
+        idx = id_map.get(val, id_map.get(default) if default is not None else None)
+        if idx is not None:
+            counts[idx] += 1
+    return counts
+
+
+def _build_losses(cfg: TrainConfig, rows: list[dict], n_classes: dict, device):
+    """One HeadLoss per head: focal/CE + optional class-balanced weights.
+
+    Class weighting (effective-number, Cui 2019) is the fix for the 47:1 intent
+    imbalance that pinned macro-F1 near 0.23 with rare intents at 0.000.
+    """
+    o = cfg.optim
+    kind_map = {
+        "intent": o.loss_intent, "language": o.loss_lang, "register": o.loss_register,
+        "emotion": o.loss_emotion, "filler_type": o.loss_fillertype,
+    }
+    balance = set(o.balance_heads or ())
+    weight_map = {}
+    for h in HEADS:
+        if h in balance and o.class_balance_beta > 0.0:
+            counts = _class_counts(rows, h, n_classes[h])
+            weight_map[h] = effective_number_weights(
+                counts, beta=o.class_balance_beta, num_classes=n_classes[h]).to(device)
+        else:
+            weight_map[h] = None
+    losses = build_head_losses(kind_map, weight_map, o.focal_gamma, o.label_smoothing)
+    return {h: l.to(device) for h, l in losses.items()}, weight_map
+
+
 def _use_amp(cfg: TrainConfig, device: torch.device) -> bool:
     return bool(cfg.run.amp) and device.type == "cuda"
+
+
+def _param_groups(model: nn.Module, weight_decay: float):
+    """AdamW hygiene: decay only 2-D matmul weights. LayerNorm/bias/embeddings
+    are scale/shift params — decaying them just fights the norm and hurts."""
+    decay, no_decay = [], []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if p.ndim < 2 or name.endswith(".bias") or "embed" in name or "pos" in name:
+            no_decay.append(p)
+        else:
+            decay.append(p)
+    return [
+        {"params": decay, "weight_decay": weight_decay},
+        {"params": no_decay, "weight_decay": 0.0},
+    ]
 
 
 def _build_loaders(cfg: TrainConfig):
@@ -102,10 +168,9 @@ def evaluate(model, loader, device, ce, weights, n_classes, collect_cm_for="inte
     correct = {h: 0 for h in HEADS}
     seen = 0
     cm_preds, cm_targets = [], []
-    autocast = torch.cuda.amp.autocast
     for batch in loader:
         batch = _to_device(batch, device)
-        with autocast(enabled=use_amp):
+        with torch.autocast(device_type="cuda", enabled=use_amp):
             out = model(batch)
             bs = batch["intent"].size(0)
             loss = 0.0
@@ -200,11 +265,19 @@ def _train_loop(cfg: TrainConfig) -> None:
         print(f"[model] {trainable/1e6:.2f}M trainable / {total/1e6:.2f}M total")
 
     weights = _loss_weights(cfg)
-    ce = {h: nn.CrossEntropyLoss(label_smoothing=cfg.optim.label_smoothing) for h in HEADS}
+    ce, weight_map = _build_losses(cfg, train_dl.dataset.rows, n_classes, device)
+    if is_main():
+        iw = weight_map.get("intent")
+        kinds = ", ".join(f"{h}:{ce[h].kind}" for h in HEADS)
+        print(f"[loss] {kinds} | focal_gamma={cfg.optim.focal_gamma} "
+              f"| class_balance_beta={cfg.optim.class_balance_beta}")
+        if iw is not None:
+            print(f"[loss] intent class-weights range "
+                  f"[{iw.min():.2f}, {iw.max():.2f}] (rare intents up-weighted)")
 
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.optim.lr,
-                            weight_decay=cfg.optim.weight_decay)
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    opt = torch.optim.AdamW(_param_groups(unwrap(model), cfg.optim.weight_decay),
+                            lr=cfg.optim.lr, betas=(0.9, 0.95), eps=1e-8)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     steps_per_epoch = max(len(train_dl), 1)
     total_steps = steps_per_epoch * cfg.optim.epochs
     warmup = max(int(total_steps * cfg.optim.warmup_ratio), 1)
@@ -231,7 +304,6 @@ def _train_loop(cfg: TrainConfig) -> None:
     best_f1 = -1.0
     global_step = 0
     tp = Throughput()
-    autocast = torch.cuda.amp.autocast
 
     for epoch in range(1, cfg.optim.epochs + 1):
         model.train()
@@ -248,7 +320,7 @@ def _train_loop(cfg: TrainConfig) -> None:
                 g["lr"] = lr_at(global_step)
             batch = _to_device(batch, device)
             opt.zero_grad(set_to_none=True)
-            with autocast(enabled=use_amp):
+            with torch.autocast(device_type="cuda", enabled=use_amp):
                 out = model(batch)
                 loss = sum(weights[h] * ce[h](out[h], batch[h]) for h in HEADS)
             scaler.scale(loss).backward()
@@ -297,9 +369,16 @@ def _train_loop(cfg: TrainConfig) -> None:
                     f"{rate['samples_per_s']:.0f} smp/s"
                     + (f" | rss {ds.get('rss_mb',0):.0f}MB" if ds.get("rss_mb") else "")
                 )
-                if vm["macro_f1_intent"] >= best_f1:
+                star = ""
+                if vm["macro_f1_intent"] > best_f1:   # strict: keep the first-best on ties
                     best_f1 = vm["macro_f1_intent"]
                     _save(unwrap(model), cfg, label_maps, out_dir / "best", epoch, vm)
+                    star = "  <- best macro-F1 (checkpointed)"
+                if star:
+                    print(star)
+                # realtime terminal curves (Kaggle/Colab/SSH friendly)
+                if cfg.run.term_plot:
+                    termplot.render(history, epochs_total=cfg.optim.epochs)
         if is_main() and epoch % cfg.run.plot_every_epochs == 0:
             plot_curves(history, curves_png)
         if is_main():
