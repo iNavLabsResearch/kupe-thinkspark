@@ -27,7 +27,7 @@ model:
   hf_model_name: ai4bharat/indic-bert
 
 optim:
-  epochs: 12
+  epochs: 15               # early_stop still on — extra budget, not forced overfit
   batch_size: 64
   lr: 5.0e-4
   min_lr_ratio: 0.05

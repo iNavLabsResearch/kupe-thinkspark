@@ -81,21 +81,21 @@ def main() -> int:
     model.eval()
     wrap = _OnnxWrap(model).eval()
 
-    # dummy inputs (batch=1); dynamic axes let the worker use any length ≤ max
-    di = torch.randint(0, 255, (1, min(16, max_in)), dtype=torch.long)
+    # Dummy inputs at FULL max length. PyTorch's TransformerEncoder fast path
+    # bakes an attention reshape from the trace's sequence length, so exporting
+    # with variable seq produces a graph that fails at a different length. We
+    # therefore fix the sequence to max and PAD every request to max at inference
+    # (the worker builds a real 1/0 mask so padding is ignored). Only batch is
+    # dynamic.
+    di = torch.randint(0, 255, (1, max_in), dtype=torch.long)
     dim = torch.ones_like(di, dtype=torch.long)
-    dc = torch.randint(0, 255, (1, min(24, max_ctx)), dtype=torch.long)
+    dc = torch.randint(0, 255, (1, max_ctx), dtype=torch.long)
     dcm = torch.ones_like(dc, dtype=torch.long)
 
     onnx_path = out / "thinkspark.onnx"
     out_names = ["intent", "language", "register", "emotion", "filler_type"]
-    dynamic = {
-        "input_ids": {0: "batch", 1: "in_len"},
-        "input_mask": {0: "batch", 1: "in_len"},
-        "context_ids": {0: "batch", 1: "ctx_len"},
-        "context_mask": {0: "batch", 1: "ctx_len"},
-        **{n: {0: "batch"} for n in out_names},
-    }
+    dynamic = {n: {0: "batch"} for n in
+               ["input_ids", "input_mask", "context_ids", "context_mask", *out_names]}
     export_kwargs = dict(
         input_names=["input_ids", "input_mask", "context_ids", "context_mask"],
         output_names=out_names, dynamic_axes=dynamic, opset_version=args.opset,

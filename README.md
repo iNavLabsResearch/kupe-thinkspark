@@ -1,14 +1,21 @@
-# kupe-thinkspark — a tiny multilingual "thinking sound" predictor
+# kupe-thinkspark — ultra-lightweight multilingual "thinking sound" predictor
+
+<p align="center">
+  <img src="docs/architecture.svg" alt="ThinkSpark ultra-lightweight dual-encoder architecture" width="100%">
+</p>
 
 Voice AI agents run **STT → LLM → TTS**. Between the user finishing (STT) and the
 agent's real reply (TTS) there is dead air. **ThinkSpark** fills that gap with a
 *human* thinking sound / backchannel — `hmm`, `अच्छा`, `एक सेकंड`, `sí sí`,
 `ええと` — in the **right language, native script, register and emotion** for the
-moment. It's a ~1–3M-param model that trains **locally on a Mac M1** and infers in
-single-digit milliseconds.
+moment.
 
-It mirrors the `kupe-tts` workflow: **Sarvam `gemma4`** generates the data (live
-SSE streaming, tqdm, cost ledger), and everything else is local.
+It is **ultra-lightweight**: ~4.4M parameters, a 259-row byte vocab, no GPU at
+inference, **2–8 ms on CPU**. Smaller than a JPEG. Trains on a Mac M1 / Kaggle
+T4, then ships as ONNX into the voice worker.
+
+It mirrors the `kupe-tts` workflow: **Sarvam** generates the data (live SSE
+streaming, tqdm, cost ledger), and everything else is local.
 
 ```
 STT text ──▶  ThinkSpark  ──▶  "हम्म, एक सेकंड…"  ──▶ TTS  ──▶  (LLM answer streams in)
@@ -33,7 +40,7 @@ the byte-level tokenizer reads any script with zero OOV, and each row also carri
 context = key/value), so the same input yields a different spark as the
 conversation evolves — e.g. an *apologetic/calming* murmur once the user has
 repeated a complaint across turns, a *curious* one during fresh small talk. See
-[`thinkspark/model.py`](thinkspark/model.py).
+[`thinkspark/model.py`](thinkspark/model.py) and the architecture SVG at the top of this README.
 
 ---
 
@@ -149,12 +156,32 @@ python scripts/03_train.py --gpus 2           # DDP on 2 GPUs (Kaggle T4 x2)
 | **Kaggle T4 x2** | auto DDP on both T4s (~2× throughput) |
 | **any NVIDIA PC** | 1 GPU → single process; 2+ GPUs → DDP |
 
-**Kaggle (T4 x2) / Colab notebook** — enable internet, then:
+**Kaggle (T4 x2) / Colab notebook** — enable internet, then in the first cell set
+credentials (or add them under **Add-ons → Secrets** as `HF_TOKEN` / `SARVAM_API_KEY`
+and read them with `UserSecretsClient`):
+
+```python
+import os
+os.environ["HF_TOKEN"] = "hf_..."            # write token — needed to push the model
+os.environ["HUGGINGFACE_HUB_TOKEN"] = os.environ["HF_TOKEN"]
+# os.environ["SARVAM_API_KEY"] = "sk_..."    # only if you generate data on Kaggle
+```
+
+Clone, install, train:
 
 ```python
 # clone your repo, then:
 !pip install -r requirements.txt
 !python scripts/03_train.py --config configs/thinkspark_tiny.yaml
+```
+
+Training is **15 epochs** with **early stopping** (patience 4, min Δ 0.002 on val
+macro-F1). Extra epochs are a ceiling, not a forced march — the best checkpoint
+is always kept. After training:
+
+```python
+!python scripts/export_onnx.py --ckpt artifacts/thinkspark/best
+!python scripts/push_to_hf.py     # uploads weights + ONNX + architecture.svg model card
 ```
 
 Real-time in the terminal: a **tqdm bar per epoch** with running loss, intent
@@ -186,8 +213,9 @@ config/taxonomy.py       languages, scripts, intents, emotions, filler LEXICON
 config/paths.py          all paths + .env loader
 data_scripts/            data_gen_agent.py (Sarvam) · build_dataset.py · eda_report.py
 thinkspark/              tokenizer · dataset · model · trainer · infer · metrics · plots · hf_data
-configs/                 thinkspark_tiny.yaml (real) · thinkspark_smoke.yaml (fast)
-scripts/                 01_generate_data · 02_build_dataset · 03_train · 04_infer · 05_upload_hf · smoke_test
+configs/                 thinkspark_tiny.yaml (real, 15 epochs) · thinkspark_smoke.yaml (fast)
+scripts/                 01_generate_data · 02_build_dataset · 03_train · 04_infer · push_to_hf · export_onnx
+docs/architecture.svg    dual-encoder diagram (also the HF model-card hero)
 data/  reports/  artifacts/
 ```
 

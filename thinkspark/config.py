@@ -48,7 +48,7 @@ class ModelCfg:
 
 @dataclass
 class OptimCfg:
-    epochs: int = 12
+    epochs: int = 15         # ceiling; early_stop keeps the best val ckpt
     batch_size: int = 64
     lr: float = 5.0e-4           # a touch higher; warmup + cosine keep it stable
     min_lr_ratio: float = 0.05

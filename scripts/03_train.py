@@ -8,6 +8,7 @@ Fetches splits from Hugging Face if they are not already on disk, then trains.
     python scripts/03_train.py --gpus 2            # force DDP (Kaggle T4 x2)
     python scripts/03_train.py --distributed off   # single GPU even if 2 are visible
     python scripts/03_train.py --refresh-data      # re-download from HF
+    python scripts/03_train.py --epochs 15         # override yaml (early-stop still on)
 """
 import argparse
 import os
@@ -34,6 +35,7 @@ def main() -> int:
     ap.add_argument("--gpus", type=int, default=None, help="0=auto all CUDA GPUs, 1=single, 2=DDP on two GPUs")
     ap.add_argument("--distributed", choices=["auto", "on", "off"], default=None)
     ap.add_argument("--no-amp", action="store_true", help="disable CUDA mixed precision")
+    ap.add_argument("--epochs", type=int, default=None, help="override yaml epochs (early-stop still on)")
     args = ap.parse_args()
 
     cfg = TrainConfig.load(args.config)
@@ -49,6 +51,8 @@ def main() -> int:
         cfg.run.distributed = args.distributed
     if args.no_amp:
         cfg.run.amp = False
+    if args.epochs is not None:
+        cfg.optim.epochs = args.epochs
     train(cfg)
     return 0
 

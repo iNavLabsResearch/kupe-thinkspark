@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 780" width="1040" height="780" role="img" aria-label="ThinkSpark ultra-lightweight dual-encoder architecture">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#070b16"/>
+      <stop offset="100%" stop-color="#10182c"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#12203a"/>
+      <stop offset="100%" stop-color="#1a1433"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#163044"/>
+      <stop offset="100%" stop-color="#0f2233"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a2a12"/>
+      <stop offset="100%" stop-color="#2a1d0c"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a1d48"/>
+      <stop offset="100%" stop-color="#1b1433"/>
+    </linearGradient>
+    <linearGradient id="mint" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0f2a24"/>
+      <stop offset="100%" stop-color="#142a1c"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1040" height="780" rx="28" fill="url(#bg)"/>
+  <rect x="1.5" y="1.5" width="1037" height="777" rx="26.5" fill="none" stroke="#2a3558" stroke-width="1.5"/>
+
+  <!-- header -->
+  <rect x="24" y="20" width="992" height="92" rx="18" fill="url(#header)" stroke="#3a4a78"/>
+  <text x="48" y="56" fill="#e8eefc" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="26" font-weight="700">ThinkSpark</text>
+  <text x="210" y="56" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="500">ultra-lightweight dual-encoder</text>
+  <text x="48" y="86" fill="#6ee7b7" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" letter-spacing="0.4">~4.4M params  ∑  259-byte vocab  ∑  CPU 28 ms  ∑  22 languages  ∑  zero OOV</text>
+  <rect x="780" y="38" width="212" height="56" rx="12" fill="#0b1220" stroke="#5ce1e6"/>
+  <text x="886" y="62" text-anchor="middle" fill="#5ce1e6" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="1.4">ULTRA LIGHT</text>
+  <text x="886" y="80" text-anchor="middle" fill="#c9d4f0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">smaller than a JPEG</text>
+
+  <!-- inputs -->
+  <rect x="24" y="132" width="480" height="96" rx="16" fill="url(#cyan)" stroke="#5ce1e6"/>
+  <text x="44" y="164" fill="#5ce1e6" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="1.6">INPUT  ∑  PRIMARY</text>
+  <text x="44" y="190" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="600">last user utterance</text>
+  <text x="44" y="212" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">STT text  ∑  96 bytes  ∑  any script</text>
+
+  <rect x="536" y="132" width="480" height="96" rx="16" fill="url(#amber)" stroke="#f5b942"/>
+  <text x="556" y="164" fill="#f5b942" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="1.6">CONTEXT  ∑  MODULATES</text>
+  <text x="556" y="190" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="600">past conversation</text>
+  <text x="556" y="212" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">multi-turn  ∑  384 bytes  ∑  any mix of languages</text>
+
+  <!-- tokenizer -->
+  <rect x="24" y="248" width="992" height="56" rx="14" fill="#0e1628" stroke="#3a4a78"/>
+  <text x="520" y="274" text-anchor="middle" fill="#c9d4f0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="600">byte-level tokenizer  ∑  UTF-8 bytes  ∑  vocab 259  ∑  zero out-of-vocabulary</text>
+  <text x="520" y="294" text-anchor="middle" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">Devanagari  Tamil  Gujarati  kana  Arabic  Latin  emoji   same tiny embedding table</text>
+
+  <!-- encoders -->
+  <rect x="24" y="324" width="480" height="124" rx="16" fill="#0e1a2c" stroke="#5ce1e6"/>
+  <text x="44" y="356" fill="#5ce1e6" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2">INPUT ENCODER</text>
+  <text x="44" y="384" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="600">5 transformer layers</text>
+  <text x="44" y="410" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">d_model 192  ∑  6 heads  ∑  GELU FFN ◊3</text>
+  <text x="44" y="430" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">shared byte embedding  ∑  pre-norm</text>
+
+  <rect x="536" y="324" width="480" height="124" rx="16" fill="#1c160c" stroke="#f5b942"/>
+  <text x="556" y="356" fill="#f5b942" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="700" letter-spacing="1.2">CONTEXT ENCODER</text>
+  <text x="556" y="384" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="600">3 transformer layers</text>
+  <text x="556" y="410" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">same width  ∑  lighter stack  ∑  independent weights</text>
+  <text x="556" y="430" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">never overwrites the input signal</text>
+
+  <!-- fusion -->
+  <rect x="24" y="468" width="992" height="92" rx="16" fill="url(#violet)" stroke="#a78bfa"/>
+  <text x="520" y="500" text-anchor="middle" fill="#a78bfa" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="700" letter-spacing="1.6">CROSS-ATTENTION FUSION  ∑  2 LAYERS</text>
+  <text x="520" y="526" text-anchor="middle" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="600">input tokens query the context  ∑  context is key / value</text>
+  <text x="520" y="548" text-anchor="middle" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">same okay yields an apologetic spark after a complaint  ∑  a curious one in small talk</text>
+
+  <!-- heads -->
+  <rect x="24" y="580" width="184" height="80" rx="14" fill="#121a2c" stroke="#6ee7b7"/>
+  <text x="116" y="612" text-anchor="middle" fill="#6ee7b7" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="1.2">INTENT</text>
+  <text x="116" y="638" text-anchor="middle" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">9 agent reactions</text>
+
+  <rect x="224" y="580" width="184" height="80" rx="14" fill="#121a2c" stroke="#5ce1e6"/>
+  <text x="316" y="612" text-anchor="middle" fill="#5ce1e6" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="1.2">LANGUAGE</text>
+  <text x="316" y="638" text-anchor="middle" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">22 native scripts</text>
+
+  <rect x="424" y="580" width="184" height="80" rx="14" fill="#121a2c" stroke="#f5b942"/>
+  <text x="516" y="612" text-anchor="middle" fill="#f5b942" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="1.2">REGISTER</text>
+  <text x="516" y="638" text-anchor="middle" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">formal ∑ casual ∑ mixed</text>
+
+  <rect x="624" y="580" width="184" height="80" rx="14" fill="#121a2c" stroke="#a78bfa"/>
+  <text x="716" y="612" text-anchor="middle" fill="#a78bfa" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="1.2">EMOTION</text>
+  <text x="716" y="638" text-anchor="middle" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">tone of the moment</text>
+
+  <rect x="824" y="580" width="192" height="80" rx="14" fill="#121a2c" stroke="#fb7185"/>
+  <text x="920" y="612" text-anchor="middle" fill="#fb7185" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="1.2">FILLER TYPE</text>
+  <text x="920" y="638" text-anchor="middle" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">sound ∑ word ∑ none</text>
+
+  <!-- output -->
+  <rect x="24" y="680" width="992" height="76" rx="16" fill="url(#mint)" stroke="#6ee7b7"/>
+  <text x="48" y="712" fill="#6ee7b7" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="700" letter-spacing="1.4">SPARK  ∑  SAMPLED FROM FILLER DICTIONARY</text>
+  <text x="48" y="738" fill="#e8eefc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="600">hmm   M>   èï ∏«ï®Õ°   HHh   got it   or silence</text>
+  <text x="992" y="726" text-anchor="end" fill="#8b9cc8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">then TTS, while the LLM writes the real reply</text>
+</svg>
