@@ -9,11 +9,26 @@ dependency-free ASCII sparkline so it never crashes a run.
 
 from __future__ import annotations
 
-try:
-    import plotext as _plt  # type: ignore
-    _HAS_PLOTEXT = True
-except Exception:  # pragma: no cover - optional dep
+import os
+
+# Opt-IN to plotext braille charts with THINKSPARK_PLOTEXT=1. Default is the
+# dependency-free ASCII sparkline: it renders identically on Mac / Colab / Kaggle
+# and never spams errors when a host ships a broken/partial `plotext` build (some
+# Kaggle images expose a `plotext` with neither `.plot` nor `.subplots`).
+_WANT_PLOTEXT = os.environ.get("THINKSPARK_PLOTEXT", "0") == "1"
+
+if _WANT_PLOTEXT:
+    try:
+        import plotext as _plt  # type: ignore
+        # sanity-check the API actually exists before we rely on it
+        _HAS_PLOTEXT = all(callable(getattr(_plt, n, None)) for n in ("plot", "show"))
+    except Exception:  # pragma: no cover - optional dep
+        _HAS_PLOTEXT = False
+else:
     _HAS_PLOTEXT = False
+
+# flips to True after the first plotext failure so we never spam the same error
+_PLOTEXT_DISABLED = False
 
 _BLOCKS = "▁▂▃▄▅▆▇█"
 
@@ -77,7 +92,8 @@ def render(history: dict, *, epochs_total: int | None = None) -> None:
     if not ve:
         return
 
-    if _HAS_PLOTEXT:
+    global _PLOTEXT_DISABLED
+    if _HAS_PLOTEXT and not _PLOTEXT_DISABLED:
         try:
             _one_plot(ve, [(vloss, "red+", "val loss")], "val loss", y01=False)
             _one_plot(
@@ -86,8 +102,10 @@ def render(history: dict, *, epochs_total: int | None = None) -> None:
                 "val intent — macro-F1 / acc", y01=True,
             )
             return
-        except Exception as e:  # never let a plot break training
-            print(f"  [termplot] plotext failed ({e}); ascii fallback:")
+        except Exception as e:  # never let a plot break training; report ONCE
+            _PLOTEXT_DISABLED = True
+            print(f"  [termplot] plotext unavailable ({e}); using ascii sparklines "
+                  f"for the rest of the run.")
 
     best_f1 = max(vf1) if vf1 else 0.0
     print(f"  loss  {_sparkline(vloss)}  {vloss[-1]:.3f}")

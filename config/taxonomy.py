@@ -430,6 +430,98 @@ ID2INTENT = {i: t for t, i in INTENT2ID.items()}
 ID2EMOTION = {i: e for e, i in EMOTION2ID.items()}
 ID2FILLERTYPE = {i: t for t, i in FILLERTYPE2ID.items()}
 
+# ===========================================================================
+# SUPER-INTENTS (item 2) — the 17 fine agent-reactions collapse into 9 clean,
+# well-separated buckets. Fewer/cleaner classes => higher accuracy, higher
+# confidence, and the fillers stay fine-grained (the LEXICON/dictionary is
+# unioned per super-intent at inference). Pure RELABEL of existing data — no
+# regeneration.
+# ===========================================================================
+INTENT_TO_SUPER: dict[str, str] = {
+    "thinking": "thinking",
+    "hesitating": "thinking",
+    "clarifying_question": "clarify",
+    "agreeing": "acknowledge",
+    "positive_ack": "acknowledge",
+    "negative_ack": "disagree",
+    "skeptical": "disagree",
+    "surprised": "react_positive",
+    "excited": "react_positive",
+    "encouraging": "react_positive",
+    "empathetic": "empathize",
+    "sad_acknowledge": "empathize",
+    "apologetic": "soothe",
+    "calming": "soothe",
+    "impatient": "impatient",
+    "polite_interrupt": "impatient",
+    "no_filler": "silence",
+}
+# stable ordering for the coarse head
+SUPER_INTENTS: list[str] = [
+    "thinking", "clarify", "acknowledge", "disagree", "react_positive",
+    "empathize", "soothe", "impatient", "silence",
+]
+assert set(INTENT_TO_SUPER.values()) == set(SUPER_INTENTS)
+assert all(i in INTENT_TO_SUPER for i in INTENTS)
+
+SUPERINTENT2ID = {t: i for i, t in enumerate(SUPER_INTENTS)}
+ID2SUPERINTENT = {i: t for t, i in SUPERINTENT2ID.items()}
+
+# super-intent -> the fine intents it contains (for filler-dictionary union)
+SUPER_TO_INTENTS: dict[str, list[str]] = {s: [] for s in SUPER_INTENTS}
+for _fine, _sup in INTENT_TO_SUPER.items():
+    SUPER_TO_INTENTS[_sup].append(_fine)
+
+
+# ===========================================================================
+# EMOTION FIX (item 3) — deterministic relabel that kills the harmful cases
+# (e.g. emotion='cheerful' on an emergency/complaint). Applied at data-load, so
+# the model LEARNS corrected emotions — again, no regeneration needed.
+# ===========================================================================
+POSITIVE_EMOTIONS = {"cheerful", "playful", "warm"}
+# reactions where a positive emotion is almost always wrong
+NEGATIVE_INTENTS = {
+    "negative_ack", "skeptical", "impatient", "apologetic", "calming",
+    "sad_acknowledge", "empathetic",
+}
+# distress / urgency / complaint markers across our main languages (lowercased
+# substring match on input+context). Presence forbids a positive emotion.
+DISTRESS_MARKERS = (
+    # english
+    "angry", "urgent", "emergency", "hack", "complaint", "not working", "failed",
+    "refund", "wrong", "worst", "frustrat", "annoy", "stuck", "problem", "issue",
+    "asap", "immediately", "tired of", "fed up", "cancel",
+    # hindi / hinglish (devanagari + romanized)
+    "गुस्सा", "नाराज", "जरूरी", "ज़रूरी", "तुरंत", "जल्दी", "नहीं आया", "नहीं हुआ",
+    "गलत", "परेशान", "थक", "दिक्कत", "समस्या", "शिकायत", "बकवास", "भरोसा नहीं",
+    "gussa", "naraz", "jaldi", "turant", "galat", "pareshan", "dikkat", "shikayat",
+    # gujarati
+    "નારાજ", "તાત્કાલિક", "ઝડપી", "ખોટું", "તકલીફ", "ફરિયાદ", "કંટાળો",
+    # marathi / bengali / others (common)
+    "समस्या", "সমস্যা", "রাগ", "জরুরি",
+)
+
+
+def _has_distress(text: str) -> bool:
+    low = (text or "").lower()
+    return any(m in low for m in DISTRESS_MARKERS)
+
+
+def fix_emotion(emotion: str, intent: str, input_text: str = "", context: str = "") -> str:
+    """Return a situation-consistent emotion. Positive emotions are demoted when
+    the reaction is a negative one or the text shows distress/urgency."""
+    if emotion not in EMOTIONS:
+        emotion = "neutral"
+    if emotion in POSITIVE_EMOTIONS:
+        distressed = _has_distress(input_text) or _has_distress(context)
+        if intent in NEGATIVE_INTENTS or distressed:
+            # urgency -> anxious; otherwise a calm 'concerned'
+            urgent = any(k in (input_text + " " + context).lower()
+                         for k in ("urgent", "emergency", "asap", "तुरंत", "जल्दी",
+                                   "immediately", "hack", "તાત્કાલિક"))
+            return "anxious" if urgent else "concerned"
+    return emotion
+
 
 def sample_filler(lang: str, intent: str, ftype: str, rng=None) -> str:
     """Look up a surface form for (lang, intent, type); fall back gracefully."""
@@ -450,3 +542,21 @@ def sample_filler(lang: str, intent: str, ftype: str, rng=None) -> str:
     if not forms:
         return ""
     return rng.choice(forms)
+
+
+def sample_filler_super(lang: str, super_intent: str, ftype: str, rng=None) -> str:
+    """LEXICON fallback for a SUPER-intent: gather the surface forms of all its
+    fine intents (preferring the requested filler_type) and sample one."""
+    import random
+    rng = rng or random
+    lang_tbl = LEXICON.get(lang) or LEXICON.get("en", {})
+    forms: list[str] = []
+    for fine in SUPER_TO_INTENTS.get(super_intent, []):
+        cell = lang_tbl.get(fine, {})
+        forms += cell.get(ftype, [])
+    if not forms:  # any type across the group's fine intents
+        for fine in SUPER_TO_INTENTS.get(super_intent, []):
+            for t in ("word", "sound", "words", "sound_word", "none"):
+                forms += lang_tbl.get(fine, {}).get(t, [])
+    forms = [f for f in forms if f]
+    return rng.choice(forms) if forms else ""

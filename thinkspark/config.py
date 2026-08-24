@@ -21,6 +21,10 @@ class DataCfg:
     hf_repo: str = "anuj-inavlabs/kupe-thinkspark"
     hf_fetch: bool = True        # download from HF if local splits are missing
     hf_refresh: bool = False     # re-download even if local files exist
+    # Label scheme applied AT LOAD (no data regeneration):
+    #   "super" -> 9 clean agent-reactions (default; higher accuracy)
+    #   "fine"  -> the original 17 intents
+    intent_scheme: str = "super"
 
 
 @dataclass
@@ -88,6 +92,11 @@ class RunCfg:
     distributed: str = "auto"    # auto | on | off  (auto DDP when 2+ CUDA GPUs)
     amp: bool = True             # mixed precision on CUDA (T4 / Colab / PC)
     term_plot: bool = True       # draw live loss/F1 curves in the terminal (Kaggle)
+    # Early stopping (item 4): stop when val macro-F1 hasn't improved for
+    # `early_stop_patience` evals — best checkpoint is always kept.
+    early_stop: bool = True
+    early_stop_patience: int = 4
+    early_stop_min_delta: float = 0.002
 
 
 @dataclass

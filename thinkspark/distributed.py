@@ -48,6 +48,17 @@ def local_rank() -> int:
     return rank()
 
 
+def broadcast_bool(value: bool) -> bool:
+    """Broadcast a bool from rank 0 to all ranks (so every rank breaks the epoch
+    loop together on early stop). No-op returning `value` when not distributed."""
+    if not is_dist():
+        return value
+    dev = torch.device(f"cuda:{local_rank()}") if torch.cuda.is_available() else torch.device("cpu")
+    t = torch.tensor([1 if value else 0], dtype=torch.int, device=dev)
+    torch.distributed.broadcast(t, src=0)
+    return bool(t.item())
+
+
 def barrier() -> None:
     if not is_dist():
         return

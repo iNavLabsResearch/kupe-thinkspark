@@ -18,15 +18,15 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 
-from config.taxonomy import (
-    EMOTION2ID, FILLERTYPE2ID, INTENT2ID, INTENTS, LANG2ID, REGISTER2ID,
-)
+from config.taxonomy import FILLERTYPE2ID, LANG2ID, REGISTER2ID
 from .config import TrainConfig
 from .dataset import ThinkSparkDataset, collate, read_jsonl
+from .labels import LabelScheme
 from .losses import build_head_losses, effective_number_weights
 from . import termplot
 from .distributed import (
     barrier,
+    broadcast_bool,
     destroy_process_group,
     ddp_worker_setup,
     init_process_group,
@@ -57,18 +57,28 @@ def _loss_weights(cfg) -> dict:
 
 
 _HEAD_ROW_KEY = {  # head -> (row field, default value, str->id map)
-    "intent": ("intent", None, INTENT2ID),
     "language": ("language", None, LANG2ID),
     "register": ("register", "casual", REGISTER2ID),
-    "emotion": ("emotion", "neutral", EMOTION2ID),
     "filler_type": ("filler_type", "none", FILLERTYPE2ID),
 }
 
 
-def _class_counts(rows: list[dict], head: str, n: int) -> dict:
-    """Per-class sample counts for one head, straight from the train rows."""
-    field, default, id_map = _HEAD_ROW_KEY[head]
+def _class_counts(rows: list[dict], head: str, n: int, scheme) -> dict:
+    """Per-class sample counts for one head on the RELABELED distribution (super
+    intents + fixed emotions), so class-balance weights match what the model
+    actually trains on."""
     counts = {i: 0 for i in range(n)}
+    if head == "intent":
+        for r in rows:
+            counts[scheme.intent_id(r["intent"])] += 1
+        return counts
+    if head == "emotion":
+        for r in rows:
+            idx = scheme.emotion_id(r.get("emotion", "neutral"), r["intent"],
+                                    r["input"], r.get("context") or "")
+            counts[idx] += 1
+        return counts
+    field, default, id_map = _HEAD_ROW_KEY[head]
     for r in rows:
         val = r.get(field, default) if default is not None else r[field]
         idx = id_map.get(val, id_map.get(default) if default is not None else None)
@@ -77,7 +87,7 @@ def _class_counts(rows: list[dict], head: str, n: int) -> dict:
     return counts
 
 
-def _build_losses(cfg: TrainConfig, rows: list[dict], n_classes: dict, device):
+def _build_losses(cfg: TrainConfig, rows: list[dict], n_classes: dict, device, scheme):
     """One HeadLoss per head: focal/CE + optional class-balanced weights.
 
     Class weighting (effective-number, Cui 2019) is the fix for the 47:1 intent
@@ -92,7 +102,7 @@ def _build_losses(cfg: TrainConfig, rows: list[dict], n_classes: dict, device):
     weight_map = {}
     for h in HEADS:
         if h in balance and o.class_balance_beta > 0.0:
-            counts = _class_counts(rows, h, n_classes[h])
+            counts = _class_counts(rows, h, n_classes[h], scheme)
             weight_map[h] = effective_number_weights(
                 counts, beta=o.class_balance_beta, num_classes=n_classes[h]).to(device)
         else:
@@ -122,13 +132,13 @@ def _param_groups(model: nn.Module, weight_decay: float):
     ]
 
 
-def _build_loaders(cfg: TrainConfig):
+def _build_loaders(cfg: TrainConfig, scheme):
     tr = read_jsonl(resolve_data_path(cfg.data.train_jsonl))
     va = read_jsonl(resolve_data_path(cfg.data.val_jsonl))
     te = read_jsonl(resolve_data_path(cfg.data.test_jsonl))
 
     def mk(rows, *, shuffle: bool, sampler=None):
-        ds = ThinkSparkDataset(rows, cfg.data.max_input_len, cfg.data.max_context_len)
+        ds = ThinkSparkDataset(rows, cfg.data.max_input_len, cfg.data.max_context_len, scheme)
         return DataLoader(
             ds,
             batch_size=cfg.optim.batch_size,
@@ -140,7 +150,7 @@ def _build_loaders(cfg: TrainConfig):
             pin_memory=torch.cuda.is_available(),
         )
 
-    train_ds = ThinkSparkDataset(tr, cfg.data.max_input_len, cfg.data.max_context_len)
+    train_ds = ThinkSparkDataset(tr, cfg.data.max_input_len, cfg.data.max_context_len, scheme)
     train_sampler = DistributedSampler(train_ds, shuffle=True) if is_dist() else None
     train_dl = DataLoader(
         train_ds,
@@ -166,6 +176,7 @@ def evaluate(model, loader, device, ce, weights, n_classes, collect_cm_for="inte
     model.eval()
     tot_loss = 0.0
     correct = {h: 0 for h in HEADS}
+    intent_top2 = 0
     seen = 0
     cm_preds, cm_targets = [], []
     for batch in loader:
@@ -177,6 +188,11 @@ def evaluate(model, loader, device, ce, weights, n_classes, collect_cm_for="inte
             for h in HEADS:
                 loss = loss + weights[h] * ce[h](out[h], batch[h])
                 correct[h] += (out[h].argmax(-1) == batch[h]).sum().item()
+        # top-2 intent: for a filler predictor, a plausible (not exact) intent is
+        # what matters — neighbouring intents share interchangeable fillers.
+        k = min(2, out["intent"].size(-1))
+        top2 = out["intent"].topk(k, dim=-1).indices
+        intent_top2 += (top2 == batch["intent"].unsqueeze(-1)).any(-1).sum().item()
         seen += bs
         tot_loss += float(loss) * bs
         cm_preds.append(out[collect_cm_for].argmax(-1).detach().cpu().numpy())
@@ -185,6 +201,7 @@ def evaluate(model, loader, device, ce, weights, n_classes, collect_cm_for="inte
     metrics = {"loss": tot_loss / seen}
     for h in HEADS:
         metrics[f"acc_{h}"] = correct[h] / seen
+    metrics["top2_intent"] = intent_top2 / seen
     cm = confusion_matrix(np.concatenate(cm_preds), np.concatenate(cm_targets),
                           n_classes[collect_cm_for])
     metrics["macro_f1_intent"] = macro_f1(cm)
@@ -234,16 +251,17 @@ def _train_loop(cfg: TrainConfig) -> None:
         amp = "  amp=fp16" if use_amp else ""
         print(f"[device] {device}{extra}{amp}")
 
-    label_maps = json.loads(resolve_data_path(cfg.data.label_maps).read_text(encoding="utf-8"))
-    n_classes = {
-        "intent": len(label_maps["intents"]),
-        "language": len(label_maps["lang_list"]),
-        "register": len(label_maps["registers"]),
-        "emotion": len(label_maps["emotions"]),
-        "filler_type": len(label_maps["filler_types"]),
-    }
+    # Label space comes from the CODE taxonomy via the scheme (super/fine), NOT
+    # the downloaded label_maps.json — that's how we relabel with zero data regen.
+    scheme = LabelScheme(cfg.data.intent_scheme)
+    label_maps = scheme.to_maps()
+    intent_labels = scheme.intents
+    n_classes = scheme.n_classes()
+    if is_main():
+        print(f"[labels] intent scheme='{scheme.scheme}' "
+              f"({n_classes['intent']} intents) | emotion-fix ON")
 
-    train_dl, val_dl, test_dl, sizes, train_sampler = _build_loaders(cfg)
+    train_dl, val_dl, test_dl, sizes, train_sampler = _build_loaders(cfg, scheme)
     if is_main():
         print(f"[data] train={sizes[0]} val={sizes[1]} test={sizes[2]}  "
               f"batch={cfg.optim.batch_size} x {world_size()} GPU(s)")
@@ -265,7 +283,7 @@ def _train_loop(cfg: TrainConfig) -> None:
         print(f"[model] {trainable/1e6:.2f}M trainable / {total/1e6:.2f}M total")
 
     weights = _loss_weights(cfg)
-    ce, weight_map = _build_losses(cfg, train_dl.dataset.rows, n_classes, device)
+    ce, weight_map = _build_losses(cfg, train_dl.dataset.rows, n_classes, device, scheme)
     if is_main():
         iw = weight_map.get("intent")
         kinds = ", ".join(f"{h}:{ce[h].kind}" for h in HEADS)
@@ -302,6 +320,7 @@ def _train_loop(cfg: TrainConfig) -> None:
                "val_acc_language": [], "val_acc_filler_type": [],
                "val_acc_emotion": [], "val_macro_f1": []}
     best_f1 = -1.0
+    no_improve = 0
     global_step = 0
     tp = Throughput()
 
@@ -349,7 +368,9 @@ def _train_loop(cfg: TrainConfig) -> None:
             iterator.close()
 
         barrier()
-        if epoch % cfg.run.eval_every_epochs == 0 or epoch == cfg.optim.epochs:
+        local_stop = False
+        did_eval = epoch % cfg.run.eval_every_epochs == 0 or epoch == cfg.optim.epochs
+        if did_eval:
             if is_main():
                 vm, _ = evaluate(unwrap(model), val_dl, device, ce, weights, n_classes,
                                  use_amp=use_amp)
@@ -363,19 +384,27 @@ def _train_loop(cfg: TrainConfig) -> None:
                 rate = tp.rate(); ds = device_stats(device)
                 print(
                     f"  [val] epoch {epoch}: loss {vm['loss']:.3f} | "
-                    f"intent {vm['acc_intent']:.3f} (F1 {vm['macro_f1_intent']:.3f}) | "
+                    f"intent {vm['acc_intent']:.3f} (top2 {vm['top2_intent']:.3f}, "
+                    f"F1 {vm['macro_f1_intent']:.3f}) | "
                     f"lang {vm['acc_language']:.3f} | reg {vm['acc_register']:.3f} | "
                     f"emo {vm['acc_emotion']:.3f} | ftype {vm['acc_filler_type']:.3f} | "
                     f"{rate['samples_per_s']:.0f} smp/s"
                     + (f" | rss {ds.get('rss_mb',0):.0f}MB" if ds.get("rss_mb") else "")
                 )
-                star = ""
+                delta = vm["macro_f1_intent"] - best_f1
                 if vm["macro_f1_intent"] > best_f1:   # strict: keep the first-best on ties
                     best_f1 = vm["macro_f1_intent"]
                     _save(unwrap(model), cfg, label_maps, out_dir / "best", epoch, vm)
-                    star = "  <- best macro-F1 (checkpointed)"
-                if star:
-                    print(star)
+                    print("  <- best macro-F1 (checkpointed)")
+                # early-stop counter: only a real (> min_delta) gain resets patience
+                if delta > cfg.run.early_stop_min_delta:
+                    no_improve = 0
+                else:
+                    no_improve += 1
+                if cfg.run.early_stop and no_improve >= cfg.run.early_stop_patience:
+                    local_stop = True
+                    print(f"  [early-stop] no macro-F1 gain > {cfg.run.early_stop_min_delta} "
+                          f"for {no_improve} evals — stopping (best {best_f1:.3f}).")
                 # realtime terminal curves (Kaggle/Colab/SSH friendly)
                 if cfg.run.term_plot:
                     termplot.render(history, epochs_total=cfg.optim.epochs)
@@ -385,6 +414,9 @@ def _train_loop(cfg: TrainConfig) -> None:
             _save(unwrap(model), cfg, label_maps, out_dir / f"epoch-{epoch}", epoch, None)
             _rotate(out_dir, cfg.run.keep_last_checkpoints)
         barrier()
+        # every rank agrees on stopping so DDP breaks the loop together
+        if did_eval and broadcast_bool(local_stop):
+            break
 
     if not is_main():
         return
@@ -396,18 +428,19 @@ def _train_loop(cfg: TrainConfig) -> None:
         raw_model.load_state_dict(torch.load(best / "model.pt", map_location=device))
     tm, cm = evaluate(raw_model, test_dl, device, ce, weights, n_classes, use_amp=use_amp)
     print(f"[test] loss {tm['loss']:.3f} | intent {tm['acc_intent']:.3f} "
-          f"(macro-F1 {tm['macro_f1_intent']:.3f}) | lang {tm['acc_language']:.3f} "
+          f"(top2 {tm['top2_intent']:.3f}, macro-F1 {tm['macro_f1_intent']:.3f}) | "
+          f"lang {tm['acc_language']:.3f} "
           f"| emo {tm['acc_emotion']:.3f} | ftype {tm['acc_filler_type']:.3f}")
 
     f1s = per_class_f1(cm)
-    print("\n  per-intent F1 (test):")
-    for name, f in sorted(zip(INTENTS, f1s), key=lambda x: -x[1]):
+    print(f"\n  per-intent F1 (test, scheme='{scheme.scheme}'):")
+    for name, f in sorted(zip(intent_labels, f1s), key=lambda x: -x[1]):
         print(f"    {name:22s} {f:.3f}")
 
-    plot_confusion(cm, INTENTS, confusion_png)
+    plot_confusion(cm, intent_labels, confusion_png)
     plot_curves(history, curves_png)
     (out_dir / "test_metrics.json").write_text(
-        json.dumps({**tm, "per_intent_f1": dict(zip(INTENTS, f1s.tolist()))},
+        json.dumps({**tm, "per_intent_f1": dict(zip(intent_labels, f1s.tolist()))},
                    indent=2), encoding="utf-8")
     print(f"\n[done] plots: {curves_png}\n       {confusion_png}")
     print(f"[done] best checkpoint: {best}")

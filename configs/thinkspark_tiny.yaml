@@ -11,6 +11,8 @@ data:
   hf_repo: anuj-inavlabs/kupe-thinkspark
   hf_fetch: true           # download from HF if local splits are missing
   hf_refresh: false
+  intent_scheme: super     # super = 9 clean agent-reactions (accuracy); fine = 17
+                           # relabels at load — NO data regeneration
 
 model:
   d_model: 192             # wider than the old 128 — byte models must build words
@@ -61,3 +63,6 @@ run:
   distributed: auto        # auto | on | off
   amp: true                # mixed precision on CUDA
   term_plot: true          # live loss/F1 curves drawn in the terminal (Kaggle)
+  early_stop: true         # stop when val macro-F1 plateaus (best ckpt kept)
+  early_stop_patience: 4
+  early_stop_min_delta: 0.002

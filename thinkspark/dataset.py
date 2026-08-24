@@ -12,10 +12,9 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 
-from config.taxonomy import (
-    EMOTION2ID, FILLERTYPE2ID, INTENT2ID, LANG2ID, REGISTER2ID,
-)
+from config.taxonomy import FILLERTYPE2ID, LANG2ID, REGISTER2ID
 from . import tokenizer as tok
+from .labels import LabelScheme
 
 
 def read_jsonl(path: str | Path) -> list[dict]:
@@ -29,23 +28,29 @@ def read_jsonl(path: str | Path) -> list[dict]:
 
 
 class ThinkSparkDataset(Dataset):
-    def __init__(self, rows: list[dict], max_input_len: int, max_context_len: int):
+    def __init__(self, rows: list[dict], max_input_len: int, max_context_len: int,
+                 scheme: LabelScheme | None = None):
         self.rows = rows
         self.max_input_len = max_input_len
         self.max_context_len = max_context_len
+        self.scheme = scheme or LabelScheme("super")
 
     def __len__(self) -> int:
         return len(self.rows)
 
     def __getitem__(self, i: int) -> dict:
         r = self.rows[i]
+        fine_intent = r["intent"]
+        inp = r["input"]
+        ctx = r.get("context") or ""
         return {
-            "input_ids": tok.encode(r["input"], self.max_input_len),
-            "context_ids": tok.encode(r.get("context") or "", self.max_context_len),
-            "intent": INTENT2ID[r["intent"]],
+            "input_ids": tok.encode(inp, self.max_input_len),
+            "context_ids": tok.encode(ctx, self.max_context_len),
+            # relabel at load: fine intent -> super, and situation-fix the emotion
+            "intent": self.scheme.intent_id(fine_intent),
             "language": LANG2ID[r["language"]],
             "register": REGISTER2ID.get(r.get("register", "casual"), REGISTER2ID["casual"]),
-            "emotion": EMOTION2ID.get(r.get("emotion", "neutral"), EMOTION2ID["neutral"]),
+            "emotion": self.scheme.emotion_id(r.get("emotion", "neutral"), fine_intent, inp, ctx),
             "filler_type": FILLERTYPE2ID.get(r.get("filler_type", "none"), FILLERTYPE2ID["none"]),
         }
 
