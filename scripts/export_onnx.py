@@ -60,6 +60,12 @@ def main() -> int:
     ap.add_argument("--out", default="artifacts/onnx")
     ap.add_argument("--filler", default="data/vocab/filler_dictionary.json")
     ap.add_argument("--opset", type=int, default=17)
+    # Shorter than the training max = much faster CPU ONNX (graph is fixed-seq).
+    # Defaults fit "current utterance + last 1 user/1 agent turn".
+    ap.add_argument("--infer-input-len", type=int, default=64,
+                    help="ONNX input sequence length (≤ checkpoint max_input_len)")
+    ap.add_argument("--infer-context-len", type=int, default=128,
+                    help="ONNX context sequence length (≤ checkpoint max_context_len)")
     args = ap.parse_args()
 
     ckpt = Path(args.ckpt)
@@ -70,12 +76,21 @@ def main() -> int:
     labels = json.loads((ckpt / "label_maps.json").read_text(encoding="utf-8"))
     mcfg = _Cfg(meta["model_cfg"])
     dcfg = meta["data_cfg"]
-    max_in, max_ctx = dcfg["max_input_len"], dcfg["max_context_len"]
+    train_in, train_ctx = dcfg["max_input_len"], dcfg["max_context_len"]
+    max_in = max(8, min(int(args.infer_input_len), int(train_in)))
+    max_ctx = max(8, min(int(args.infer_context_len), int(train_ctx)))
+    if max_in != args.infer_input_len or max_ctx != args.infer_context_len:
+        print(f"[onnx] clamped infer lens to checkpoint caps "
+              f"(in {args.infer_input_len}->{max_in}, ctx {args.infer_context_len}->{max_ctx})")
+    print(f"[onnx] export seq lens: input={max_in} context={max_ctx} "
+          f"(trained max {train_in}/{train_ctx})")
 
+    # Build with TRAINED max lens so position embeddings match checkpoint weights.
+    # The ONNX graph is traced at the shorter infer lens below.
     model = ThinkSpark(
         mcfg, len(labels["intents"]), len(labels["lang_list"]),
         len(labels["registers"]), len(labels["emotions"]),
-        len(labels["filler_types"]), max_in, max_ctx,
+        len(labels["filler_types"]), train_in, train_ctx,
     )
     model.load_state_dict(torch.load(ckpt / "model.pt", map_location="cpu"))
     model.eval()
