@@ -8,6 +8,9 @@ data:
   label_maps: data/vocab/label_maps.json
   max_input_len: 96        # bytes of the user utterance (primary signal)
   max_context_len: 384     # bytes of the PAST conversation transcript (multi-turn, multilingual)
+  hf_repo: anuj-inavlabs/kupe-thinkspark
+  hf_fetch: true           # download from HF if local splits are missing
+  hf_refresh: false
 
 model:
   d_model: 128
@@ -34,7 +37,7 @@ optim:
   label_smoothing: 0.05
 
 run:
-  device: auto             # auto -> mps on M1, else cpu
+  device: auto             # auto -> cuda (Kaggle/Colab/PC) | mps (Mac) | cpu
   seed: 42
   num_workers: 0
   output_dir: artifacts/thinkspark
@@ -42,3 +45,6 @@ run:
   eval_every_epochs: 1
   plot_every_epochs: 1
   keep_last_checkpoints: 3
+  gpus: 0                  # 0 = use all CUDA GPUs (T4 x2 -> DDP automatically)
+  distributed: auto        # auto | on | off
+  amp: true                # mixed precision on CUDA

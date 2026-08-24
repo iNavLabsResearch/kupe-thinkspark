@@ -8,6 +8,9 @@ data:
   label_maps: data/vocab/label_maps.json
   max_input_len: 64
   max_context_len: 192     # multi-turn multilingual context
+  hf_repo: anuj-inavlabs/kupe-thinkspark
+  hf_fetch: false          # smoke uses locally generated synthetic splits
+  hf_refresh: false
 
 model:
   d_model: 64
@@ -42,3 +45,6 @@ run:
   eval_every_epochs: 1
   plot_every_epochs: 1
   keep_last_checkpoints: 2
+  gpus: 1
+  distributed: off
+  amp: false

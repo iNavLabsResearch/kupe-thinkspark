@@ -73,7 +73,7 @@ pip install -r requirements.txt
 cp .env.example .env       # paste your SARVAM_API_KEY (same key kupe-tts uses)
 ```
 
-No CUDA, no wandb. Training runs on **MPS** (Apple Silicon) or CPU automatically.
+No CUDA required on a Mac. Training auto-picks **CUDA** (Kaggle / Colab / NVIDIA PC), **MPS** (Apple Silicon), or **CPU**. Two CUDA GPUs (Kaggle **T4 x2**) train with DistributedDataParallel automatically.
 
 ---
 
@@ -127,10 +127,34 @@ Validates + **hard-rejects wrong-script leaks** (e.g. Gujarati inside Hindi),
 dedupes, **stratifies by language × intent** into `train/val/test.jsonl`, and
 writes `label_maps.json` + `filler_dictionary.json`.
 
-### 3. Train locally (M1)
+### 3. Train — fetch from Hugging Face, then train (Mac / PC / Colab / Kaggle)
 
 ```bash
 python scripts/03_train.py --config configs/thinkspark_tiny.yaml
+```
+
+**Data:** if `data/splits/{train,val,test}.jsonl` and `data/vocab/label_maps.json` are already on disk, training starts immediately. If they are missing, they are downloaded from [`anuj-inavlabs/kupe-thinkspark`](https://huggingface.co/datasets/anuj-inavlabs/kupe-thinkspark) (public; `HF_TOKEN` optional). Next run reuses the local files.
+
+```bash
+python scripts/03_train.py --refresh-data     # force re-download
+python scripts/03_train.py --no-fetch         # local files only
+python scripts/03_train.py --gpus 1           # single GPU even if 2 are visible
+python scripts/03_train.py --gpus 2           # DDP on 2 GPUs (Kaggle T4 x2)
+```
+
+| Machine | What happens |
+|---------|----------------|
+| **MacBook** (MPS) | skip DDP, train on Apple GPU |
+| **Colab 1 GPU** | CUDA + fp16 AMP, one process |
+| **Kaggle T4 x2** | auto DDP on both T4s (~2× throughput) |
+| **any NVIDIA PC** | 1 GPU → single process; 2+ GPUs → DDP |
+
+**Kaggle (T4 x2) / Colab notebook** — enable internet, then:
+
+```python
+# clone your repo, then:
+!pip install -r requirements.txt
+!python scripts/03_train.py --config configs/thinkspark_tiny.yaml
 ```
 
 Real-time in the terminal: a **tqdm bar per epoch** with running loss, intent
@@ -138,6 +162,8 @@ accuracy and LR; a printed **metrics table** after every validation (per-head
 accuracy + macro-F1 + throughput + RSS); and **PNG plots** refreshed each epoch
 (`training_curves.png`, `confusion_intent.png` in the run dir). Best checkpoint is
 kept by val macro-F1; final held-out **test** eval prints per-intent F1.
+
+Optional: `torchrun --nproc_per_node=2 scripts/03_train.py` also works (skips auto-spawn).
 
 ### 4. Try it
 
@@ -159,9 +185,9 @@ In the REPL, type the user's line; prefix a line with `@` to set the context.
 config/taxonomy.py       languages, scripts, intents, emotions, filler LEXICON
 config/paths.py          all paths + .env loader
 data_scripts/            data_gen_agent.py (Sarvam) · build_dataset.py · eda_report.py
-thinkspark/              tokenizer · dataset · model · trainer · infer · metrics · plots
+thinkspark/              tokenizer · dataset · model · trainer · infer · metrics · plots · hf_data
 configs/                 thinkspark_tiny.yaml (real) · thinkspark_smoke.yaml (fast)
-scripts/                 01_generate_data · 02_build_dataset · 03_train · 04_infer · smoke_test
+scripts/                 01_generate_data · 02_build_dataset · 03_train · 04_infer · 05_upload_hf · smoke_test
 data/  reports/  artifacts/
 ```
 

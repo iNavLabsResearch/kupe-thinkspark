@@ -18,6 +18,9 @@ class DataCfg:
     max_input_len: int = 96      # bytes of the user utterance (primary)
     max_context_len: int = 384   # bytes of the PAST conversation transcript
                                  # (multi-turn, possibly multilingual — needs room)
+    hf_repo: str = "anuj-inavlabs/kupe-thinkspark"
+    hf_fetch: bool = True        # download from HF if local splits are missing
+    hf_refresh: bool = False     # re-download even if local files exist
 
 
 @dataclass
@@ -51,14 +54,17 @@ class OptimCfg:
 
 @dataclass
 class RunCfg:
-    device: str = "auto"         # auto -> mps | cuda | cpu
+    device: str = "auto"         # auto -> cuda | mps | cpu
     seed: int = 42
-    num_workers: int = 0         # 0 is safest/ fastest on macOS for small data
+    num_workers: int = 0         # 0 is safest on macOS; linux CUDA can use 2
     output_dir: str = "artifacts/thinkspark"
     log_every: int = 10
     eval_every_epochs: int = 1
     plot_every_epochs: int = 1
     keep_last_checkpoints: int = 3
+    gpus: int = 0                # 0 = auto (use all CUDA GPUs)
+    distributed: str = "auto"    # auto | on | off  (auto DDP when 2+ CUDA GPUs)
+    amp: bool = True             # mixed precision on CUDA (T4 / Colab / PC)
 
 
 @dataclass

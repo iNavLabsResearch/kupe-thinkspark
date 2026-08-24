@@ -14,3 +14,6 @@ pyyaml>=6.0
 openai>=1.40
 rich>=13.0            # split-screen live view (stats + SSE stream). Falls back to
                      # a plain tqdm bar if rich is unavailable.
+
+# Hugging Face — fetch training splits (and optional upload)
+huggingface_hub>=0.23.0

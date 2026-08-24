@@ -8,12 +8,16 @@ import torch
 
 
 def pick_device(pref: str = "auto") -> torch.device:
+    """Prefer CUDA (Kaggle/Colab/PC), then MPS (Mac), then CPU."""
     if pref and pref != "auto":
         return torch.device(pref)
+    if torch.cuda.is_available():
+        from .distributed import already_distributed, local_rank
+        if already_distributed():
+            return torch.device(f"cuda:{local_rank()}")
+        return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
     return torch.device("cpu")
 
 
