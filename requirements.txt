@@ -11,6 +11,11 @@ matplotlib>=3.8
 plotext>=5.2          # realtime training curves drawn in the terminal (Kaggle/Colab)
 pyyaml>=6.0
 
+# ONNX export for the CPU voice worker (scripts/export_onnx.py) — export-time only.
+# The worker itself needs just onnxruntime + numpy + huggingface_hub (no torch/onnx).
+onnx>=1.16
+onnxruntime>=1.17
+
 # Data generation (Sarvam sarvam-105b via OpenAI-compatible v2 endpoint)
 openai>=1.40
 rich>=13.0            # split-screen live view (stats + SSE stream). Falls back to

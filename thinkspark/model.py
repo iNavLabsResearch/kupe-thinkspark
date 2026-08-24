@@ -115,6 +115,31 @@ class ThinkSpark(nn.Module):
         m = mask.unsqueeze(-1).float()
         return (x * m).sum(1) / m.sum(1).clamp_min(1.0)
 
+    def _heads(self, pooled) -> dict:
+        return {
+            "intent": self.head_intent(pooled),
+            "language": self.head_lang(pooled),
+            "register": self.head_register(pooled),
+            "emotion": self.head_emotion(pooled),
+            "filler_type": self.head_fillertype(pooled),
+        }
+
+    def forward_onnx(self, batch: dict) -> dict:
+        """ONNX-export path. Identical to `forward` EXCEPT it drops the empty-
+        context gating: the byte tokenizer always emits BOS/EOS, so context is
+        never truly empty (has_ctx is always True) and the fallback branch never
+        fired in training. Removing it avoids a bool index-assignment that
+        onnxruntime can't execute."""
+        inp = self.input_enc(batch["input_ids"], batch["input_mask"])
+        ctx = self.context_enc(batch["context_ids"], batch["context_mask"])
+        fused = self.fusion(
+            tgt=inp, memory=ctx,
+            tgt_key_padding_mask=~batch["input_mask"],
+            memory_key_padding_mask=~batch["context_mask"],
+        )
+        pooled = self.norm(self._masked_mean(fused, batch["input_mask"]))
+        return self._heads(pooled)
+
     def forward(self, batch: dict) -> dict:
         inp = self.input_enc(batch["input_ids"], batch["input_mask"])
         has_ctx = batch["context_mask"].any(dim=1, keepdim=True)  # (b,1)
